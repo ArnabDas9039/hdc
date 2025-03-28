@@ -3,6 +3,7 @@ import { storage } from "../firebase";
 import { ref, listAll, getDownloadURL } from "firebase/storage";
 import * as faceapi from "@vladmandic/face-api";
 import "./styles/App.css";
+import { Link, Navigate } from "react-router-dom";
 
 export default function FaceRecognitionApp() {
   const [groupFaces, setGroupFaces] = useState([]);
@@ -266,6 +267,9 @@ export default function FaceRecognitionApp() {
           )}
         </div>
       )}
+      <Link to="/admin">
+        <button className="btn">Admin</button>
+      </Link>
     </div>
   );
 }
