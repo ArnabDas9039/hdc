@@ -25,10 +25,7 @@ export default function AdminUpload() {
         await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
         await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
         await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
-        console.log("FaceAPI models loaded successfully!");
-      } catch (error) {
-        console.error("Error loading models:", error);
-      }
+      } catch (error) {}
     };
     loadModels();
   }, []);
@@ -119,10 +116,10 @@ export default function AdminUpload() {
         (f) => f.filename !== face.filename
       );
       setGroupPhotos(updatedFaces);
+      setPreviewUrl(null);
 
       alert("Face deleted successfully!");
     } catch (error) {
-      console.error("Error deleting face:", error);
       alert("Failed to delete face.");
     }
   };
@@ -157,7 +154,7 @@ export default function AdminUpload() {
 
           {previewUrl && (
             <div className="preview-container">
-              <img src={previewUrl} alt="Preview" className="preview-image" />
+              <img src={previewUrl} alt="Preview" className="preview-images" />
             </div>
           )}
 
@@ -168,13 +165,21 @@ export default function AdminUpload() {
                 <img
                   src={face.image}
                   alt={`Face ${index}`}
-                  className="preview-image"
+                  className="preview-images"
                 />
                 <button
                   className="delete-btn"
                   onClick={() => handleDelete(face)}
                 >
-                  ❌
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    height="24px"
+                    viewBox="0 -960 960 960"
+                    width="24px"
+                    fill="#e8eaed"
+                  >
+                    <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z" />
+                  </svg>
                 </button>
               </div>
             ))}

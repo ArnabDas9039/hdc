@@ -1,9 +1,15 @@
 import React, { useEffect, useState, useRef } from "react";
 import { storage } from "../firebase";
-import { ref, listAll, getDownloadURL } from "firebase/storage";
+import {
+  ref,
+  listAll,
+  getDownloadURL,
+  uploadBytes,
+  deleteObject,
+} from "firebase/storage";
 import * as faceapi from "@vladmandic/face-api";
 import "./styles/App.css";
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function FaceRecognitionApp() {
   const [groupFaces, setGroupFaces] = useState([]);
@@ -12,6 +18,10 @@ export default function FaceRecognitionApp() {
   const [previewUrl, setPreviewUrl] = useState(null);
   const videoRef = useRef(null);
   const [isUsingCamera, setIsUsingCamera] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [requestId, setRequestId] = useState(null);
+  const [approvalStatus, setApprovalStatus] = useState(null);
+  const [currentFile, setCurrentFile] = useState(null);
 
   // 🔹 Load Face-API models and Fetch Firebase Images
   useEffect(() => {
@@ -52,28 +62,68 @@ export default function FaceRecognitionApp() {
     loadModelsAndFetchFaces();
   }, []);
 
+  // Add status checking interval
+  useEffect(() => {
+    let intervalId;
+    if (requestId) {
+      intervalId = setInterval(async () => {
+        try {
+          const response = await fetch(
+            `${import.meta.env.VITE_API_URL || ""}/api/status/${requestId}`
+          );
+          const data = await response.json();
+
+          if (data.status !== "pending") {
+            setApprovalStatus(data.status);
+            clearInterval(intervalId);
+
+            // Delete image from Firebase upon approval/denial
+            const storageRef = ref(storage, `pending/${data.filename}`);
+            await deleteObject(storageRef);
+          }
+        } catch (error) {
+          console.error("Error checking status:", error);
+        }
+      }, 5000); // Check every 5 seconds
+    }
+    return () => intervalId && clearInterval(intervalId);
+  }, [requestId]);
+
   // Handle User Image Upload
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    setPreviewUrl(URL.createObjectURL(file));
+    try {
+      setIsProcessing(true);
+      setCurrentFile(file); // Set the current file first
+      setPreviewUrl(URL.createObjectURL(file));
 
-    const img = await faceapi.bufferToImage(file);
-    const detections = await faceapi
-      .detectSingleFace(img)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
+      const img = await faceapi.bufferToImage(file);
+      const detections = await faceapi
+        .detectSingleFace(img)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
 
-    if (detections) {
-      matchFace(detections.descriptor);
+      if (detections) {
+        await matchFace(detections.descriptor, file); // Pass file directly to matchFace
+      }
+    } catch (error) {
+      console.error("Error in file upload:", error);
+      setMatchResult({
+        isMatch: false,
+        error: "Error processing image. Please try again.",
+      });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   // Match Uploaded Face with Firebase Faces
-  const matchFace = (descriptor) => {
+  const matchFace = async (descriptor, file) => {
+    // Accept file parameter
     if (!groupFaces.length) {
-      setMatchResult("No stored faces to compare.");
+      setMatchResult({ isMatch: false, error: "No stored faces to compare." });
       return;
     }
 
@@ -85,116 +135,88 @@ export default function FaceRecognitionApp() {
           ])
       );
 
-      const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5); // Changed threshold to 0.5
+      const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5); // Changed threshold to 0.7
       const bestMatch = faceMatcher.findBestMatch(descriptor);
+
+      console.log("Best match:", bestMatch.toString());
+
+      const confidence = (1 - bestMatch.distance) * 100;
+
+      // Add failsafe for NaN values
+      if (isNaN(confidence)) {
+        throw new Error("Invalid confidence score");
+      }
 
       if (bestMatch.distance < 0.5) {
         setMatchResult({
           isMatch: true,
           distance: bestMatch.distance,
           label: bestMatch.label,
+          confidence: confidence.toFixed(2),
         });
-
-        const matchedFace = groupFaces.find(
-          (f) => f.filename === bestMatch.label
-        );
-        if (matchedFace) {
-          sendEmail(bestMatch.toString(), matchedFace.image);
-        }
       } else {
+        if (!file) {
+          // Use the passed file parameter instead of currentFile
+          throw new Error("No image file available");
+        }
+
+        // Create a unique filename
+        const filename = `pending_${Date.now()}`;
+        const storagePath = `pending/${filename}`;
+        const storageRef = ref(storage, storagePath);
+
+        // Upload to Firebase directly using the file
+        await uploadBytes(storageRef, file);
+
+        // Get the download URL
+        const downloadURL = await getDownloadURL(storageRef);
+
+        // Send email with the download URL
+        await sendEmail(bestMatch.toString(), downloadURL, filename);
+
         setMatchResult({
           isMatch: false,
+          pending: true,
           distance: bestMatch.distance,
-          label: bestMatch.label,
+          confidence: confidence.toFixed(2),
         });
       }
     } catch (error) {
-      console.error("Error matching face:", error);
-      setMatchResult({ isMatch: false, error: "Error matching face" });
+      console.error("Error in face matching process:", error);
+      setMatchResult({
+        isMatch: false,
+        error: "Error processing image. Please try again.",
+      });
     }
   };
 
-  const sendEmail = (matchText, imageUrl) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      emailjs
-        .send(
-          "service_z0e26t9",
-          "template_d3fms9p",
-          {
-            to_email: "arnabdas.9039@gmail.com",
-            subject: "Face Recognition Alert",
-            message: `User uploaded an image.\nMatch Result: ${matchText}`,
-            image: imageUrl,
-          },
-          "YOUR_USER_ID"
-        )
-        .then((response) => console.log("Email sent:", response))
-        .catch((error) => console.error("Email error:", error));
-    };
-  };
-
-  const startCamera = async () => {
+  const sendEmail = async (matchText, imageUrl, filename) => {
     try {
-      const constraints = {
-        video: {
-          facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      };
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/send-email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            subject: "Face Recognition Approval Needed",
+            message: `New face recognition request\nMatch Result: ${matchText}`,
+            image: imageUrl, // Send the download URL instead of storage path
+            filename: filename,
+          }),
+        }
+      );
 
-      // Stop any existing video stream before starting a new one
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach((track) => track.stop());
-      }
-
-      // Request access to the camera
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      setIsUsingCamera(true);
-    } catch (error) {
-      console.error("Error accessing camera:", error);
-
-      if (error.name === "NotAllowedError") {
-        alert("Camera access denied. Please allow camera permissions.");
-      } else if (error.name === "NotFoundError") {
-        alert("No camera found. Please connect a camera.");
-      } else if (error.name === "OverconstrainedError") {
-        alert("Camera constraints are too strict. Try lowering resolution.");
+      if (response.ok) {
+        const data = await response.json();
+        setRequestId(data.requestId);
       } else {
-        alert("Unable to access camera. Please check your device settings.");
+        throw new Error("Failed to send email");
       }
-    }
-  };
-
-  const triggerFileInput = () => {
-    fileInputRef.current?.click();
-  };
-
-  const captureImage = async () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext("2d").drawImage(videoRef.current, 0, 0);
-
-    canvas.toBlob(async (blob) => {
-      const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
-      handleFileUpload({ target: { files: [file] } });
-      stopCamera();
-    }, "image/jpeg");
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current?.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
-      setIsUsingCamera(false);
+    } catch (error) {
+      console.error("Failed to send email:", error);
+      alert("Failed to send approval request. Please try again.");
     }
   };
 
@@ -211,6 +233,15 @@ export default function FaceRecognitionApp() {
       fileInputRef.current.click();
     }
   };
+
+  // Cleanup preview URL when component unmounts or when new file is uploaded
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
 
   return (
     <div className="app-container">
@@ -233,6 +264,44 @@ export default function FaceRecognitionApp() {
         </div>
       </div>
 
+      {matchResult && (
+        <div className="result-container">
+          {matchResult.isMatch ? (
+            <div className="success-message">
+              <p className="text-2xl font-bold">
+                Congratulations! You are invited!
+              </p>
+              <p>Match confidence: {matchResult.confidence}%</p>
+            </div>
+          ) : (
+            <div className="error-message">
+              {matchResult.pending ? (
+                <div>
+                  <p>Your request is being reviewed.</p>
+                  {approvalStatus === "approved" && (
+                    <div className="success-message">
+                      <p className="text-2xl font-bold">
+                        Your request has been approved!
+                      </p>
+                    </div>
+                  )}
+                  {approvalStatus === "denied" && (
+                    <div className="error-message">
+                      <p className="text-2xl font-bold">
+                        Your request has been denied.
+                      </p>
+                    </div>
+                  )}
+                  {!approvalStatus && <p>Please wait for admin approval...</p>}
+                </div>
+              ) : (
+                <p>{matchResult.error || "Face not recognized"}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {previewUrl && !isUsingCamera && (
         <>
           <div className="preview-container"></div>
@@ -240,36 +309,7 @@ export default function FaceRecognitionApp() {
         </>
       )}
 
-      {matchResult && (
-        <div className="result-container">
-          {matchResult.isMatch ? (
-            <div className="success-message">
-              <p className="text-2xl font-bold">
-                🎉 Congratulations! You are invited! 🎉
-              </p>
-              <p>
-                Match confidence:{" "}
-                {((1 - matchResult.distance) * 100).toFixed(2)}%
-              </p>
-            </div>
-          ) : (
-            <div className="error-message">
-              <p>Sorry, you are not on the guest list</p>{" "}
-              {matchResult.error ? (
-                <p>{matchResult.error}</p>
-              ) : (
-                <p>
-                  Best match confidence:{" "}
-                  {((1 - matchResult.distance) * 100).toFixed(2)}%
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      <Link to="/admin">
-        <button className="btn">Admin</button>
-      </Link>
+      <Link to="/admin">{/* <button className="btn">Admin</button> */}</Link>
     </div>
   );
 }

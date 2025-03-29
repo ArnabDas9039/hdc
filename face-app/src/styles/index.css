@@ -1,0 +1,19 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+  text-align: center;
+}
+
+@media (min-width: 600px) {
+  #root {
+    max-width: 400px;
+    padding: 4rem;
+  }
+}
+
+body {
+  font-family: Arial, sans-serif;
+  width: 100%;
+  margin: 0;
+}

@@ -10,11 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@emailjs/browser": "^4.4.1",
     "@firebasegen/default-connector": "file:dataconnect-generated/js/default-connector",
     "@vladmandic/face-api": "^1.7.15",
-    "emailjs-com": "^3.2.0",
+    "dotenv": "^16.4.7",
     "firebase": "^11.5.0",
-    "idb": "^8.0.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.4.0"
