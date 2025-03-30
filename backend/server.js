@@ -47,10 +47,7 @@ app.post("/api/send-email", async (req, res) => {
   // Store the approval request with filename
   pendingApprovals.set(requestId, { image, filename, status: "pending" });
 
-  const baseUrl =
-    process.env.NODE_ENV === "production"
-      ? process.env.BASE_URL
-      : `http://localhost:${PORT}`;
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
 
   const approveLink = `${baseUrl}/api/approve/${requestId}`;
   const denyLink = `${baseUrl}/api/deny/${requestId}`;
