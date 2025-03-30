@@ -1,0 +1,7 @@
+deepface
+firebase_admin
+flask
+flask_cors
+numpy
+Pillow
+tf-keras

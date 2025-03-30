@@ -1,14 +1,5 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import * as faceapi from "@vladmandic/face-api";
-import { storage } from "../firebase";
-import {
-  ref,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-  listAll,
-} from "firebase/storage";
 import "./styles/Admin.css";
 
 export default function AdminUpload() {
@@ -19,56 +10,26 @@ export default function AdminUpload() {
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        await faceapi.nets.ssdMobilenetv1.loadFromUri("/models");
-        await faceapi.nets.faceLandmark68Net.loadFromUri("/models");
-        await faceapi.nets.faceRecognitionNet.loadFromUri("/models");
-      } catch (error) {}
-    };
-    loadModels();
-  }, []);
-
   const verifyCode = () => {
     if (codeRef.current.value === "arnab123") {
       setAdminVerified(true);
+      fetchImages();
     } else {
       alert("Incorrect Code");
     }
   };
 
-  useEffect(() => {
-    const fetchImages = async () => {
-      const storageRef = ref(storage, "faces/");
-      const imagesList = await listAll(storageRef);
-
-      const faces = await Promise.all(
-        imagesList.items.map(async (item) => {
-          const url = await getDownloadURL(item);
-          const img = await faceapi.fetchImage(url);
-          const detection = await faceapi
-            .detectSingleFace(img)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-
-          return detection
-            ? {
-                image: url,
-                descriptor: Array.from(detection.descriptor),
-                filename: item.name,
-              }
-            : null;
-        })
+  const fetchImages = async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/faces`
       );
-
-      setGroupPhotos(faces.filter(Boolean));
-    };
-
-    if (adminVerified) {
-      fetchImages();
+      const faces = await response.json();
+      setGroupPhotos(faces);
+    } catch (error) {
+      console.error("Error fetching faces:", error);
     }
-  }, [adminVerified]);
+  };
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -77,30 +38,22 @@ export default function AdminUpload() {
     setPreviewUrl(URL.createObjectURL(file));
 
     try {
-      const img = await faceapi.bufferToImage(file);
-      const detection = await faceapi
-        .detectSingleFace(img)
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+      const formData = new FormData();
+      formData.append("image", file);
 
-      if (!detection) {
-        alert("No face detected in the image");
-        return;
-      }
-
-      const filename = `face_${Date.now()}_${file.name}`;
-      const storageRef = ref(storage, `faces/${filename}`);
-      await uploadBytes(storageRef, file);
-      const fileUrl = await getDownloadURL(storageRef);
-
-      setGroupPhotos((prev) => [
-        ...prev,
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/upload-face`,
         {
-          image: fileUrl,
-          descriptor: Array.from(detection.descriptor),
-          filename,
-        },
-      ]);
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (response.ok) {
+        await fetchImages();
+      } else {
+        throw new Error("Upload failed");
+      }
     } catch (error) {
       console.error("Error uploading face:", error);
       alert("Failed to upload image");
@@ -109,16 +62,22 @@ export default function AdminUpload() {
 
   const handleDelete = async (face) => {
     try {
-      const storageRef = ref(storage, `faces/${face.filename}`);
-      await deleteObject(storageRef);
-
-      const updatedFaces = groupPhotos.filter(
-        (f) => f.filename !== face.filename
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/delete-face/${
+          face.filename
+        }`,
+        {
+          method: "DELETE",
+        }
       );
-      setGroupPhotos(updatedFaces);
-      setPreviewUrl(null);
 
-      alert("Face deleted successfully!");
+      if (response.ok) {
+        await fetchImages();
+        setPreviewUrl(null);
+        alert("Face deleted successfully!");
+      } else {
+        throw new Error("Delete failed");
+      }
     } catch (error) {
       alert("Failed to delete face.");
     }

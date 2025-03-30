@@ -1,0 +1,28 @@
+<!-- admin.html -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="static/styles.css">
+</head>
+
+<body>
+    <h2>Admin Login</h2>
+    <input type="password" id="adminPassword" placeholder="Enter Admin Password">
+    <button onclick="adminLogin()">Login</button>
+    <p id="loginResponse"></p>
+
+    <div id="adminPanel" style="display: none;">
+        <h2>Upload Image to Firebase</h2>
+        <input type="file" id="adminImageInput">
+        <button onclick="adminUpload()">Upload</button>
+        <p id="adminResponse"></p>
+    </div>
+
+    <script src="static/script.js"></script>
+</body>
+
+</html>
