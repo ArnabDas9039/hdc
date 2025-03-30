@@ -1,14 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import dotenv from "dotenv";
+import path from "path";
+
+// Load the .env file from the root directory
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 export default defineConfig({
   plugins: [react()],
-  server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
-      },
-    },
+  define: {
+    "process.env": process.env, // Pass environment variables to the app
   },
 });

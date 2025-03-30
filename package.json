@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon backend/server.js",
-    "prebuild": "node copy-env.js",
     "build": "npm install && npm install --prefix face-app && npm run build --prefix face-app",
     "start": "node backend/server.js"
   },
