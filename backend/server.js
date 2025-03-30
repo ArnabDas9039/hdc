@@ -3,12 +3,12 @@ import nodemailer from "nodemailer";
 import cors from "cors";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import path from "path";
 import { initializeApp } from "firebase/app";
 import { getStorage, ref, deleteObject } from "firebase/storage";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.resolve();
 
 dotenv.config();
 
@@ -136,6 +136,30 @@ app.get("/api/status/:requestId", async (req, res) => {
 
   res.json({ status: request.status });
 });
+
+if (process.env.NODE_ENV === "production") {
+  // Add middleware to set correct MIME types
+  app.use((req, res, next) => {
+    if (req.url.endsWith(".js")) {
+      res.type("application/javascript");
+    }
+    next();
+  });
+
+  app.use(
+    express.static(path.join(__dirname, "/face-app/dist"), {
+      setHeaders: (res, path) => {
+        if (path.endsWith(".js")) {
+          res.setHeader("Content-Type", "application/javascript");
+        }
+      },
+    })
+  );
+
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "/face-app/dist", "index.html"));
+  });
+}
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {

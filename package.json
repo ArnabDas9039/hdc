@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon backend/server.js",
-    "build": "npm install && npm install --prefix frontend && npm run build --prefix frontend",
+    "build": "npm install && npm install --prefix face-app && npm run build --prefix face-app",
     "start": "node backend/server.js"
   },
   "author": "",
