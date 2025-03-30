@@ -134,7 +134,7 @@ app.get("/api/status/:requestId", async (req, res) => {
   res.json({ status: request.status });
 });
 
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "developement") {
   // Add middleware to set correct MIME types
   app.use((req, res, next) => {
     if (req.url.endsWith(".js")) {
