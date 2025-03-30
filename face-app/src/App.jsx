@@ -69,7 +69,9 @@ export default function FaceRecognitionApp() {
       intervalId = setInterval(async () => {
         try {
           const response = await fetch(
-            `${import.meta.env.VITE_API_URL || ""}/api/status/${requestId}`
+            `${
+              import.meta.env.VITE_API_URL || "hdc.onrender.com"
+            }/api/status/${requestId}`
           );
           const data = await response.json();
 
@@ -193,7 +195,7 @@ export default function FaceRecognitionApp() {
   const sendEmail = async (matchText, imageUrl, filename) => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || ""}/api/send-email`,
+        `${import.meta.env.VITE_API_URL || "hdc.onrender.com"}/api/send-email`,
         {
           method: "POST",
           headers: {
