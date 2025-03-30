@@ -69,7 +69,7 @@ export default function FaceRecognitionApp() {
       intervalId = setInterval(async () => {
         try {
           const response = await fetch(
-            `hdc.onrender.com/api/status/${requestId}`
+            `${import.meta.env.VITE_API_URL || ""}/api/status/${requestId}`
           );
           const data = await response.json();
 
@@ -192,18 +192,21 @@ export default function FaceRecognitionApp() {
 
   const sendEmail = async (matchText, imageUrl, filename) => {
     try {
-      const response = await fetch(`hdc.onrender.com/api/send-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          subject: "Face Recognition Approval Needed",
-          message: `New face recognition request\nMatch Result: ${matchText}`,
-          image: imageUrl, // Send the download URL instead of storage path
-          filename: filename,
-        }),
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/send-email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            subject: "Face Recognition Approval Needed",
+            message: `New face recognition request\nMatch Result: ${matchText}`,
+            image: imageUrl, // Send the download URL instead of storage path
+            filename: filename,
+          }),
+        }
+      );
 
       if (response.ok) {
         const data = await response.json();
