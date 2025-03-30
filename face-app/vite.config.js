@@ -8,6 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 export default defineConfig({
   plugins: [react()],
+  base: "/",
   define: {
     "process.env": process.env, // Pass environment variables to the app
   },
