@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "prebuild": "copyfiles ../.env ./ -f",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

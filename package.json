@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon backend/server.js",
+    "prebuild": "node copy-env.js",
     "build": "npm install && npm install --prefix face-app && npm run build --prefix face-app",
     "start": "node backend/server.js"
   },
@@ -16,11 +17,9 @@
     "express": "^4.19.2",
     "firebase": "^11.5.0",
     "mongoose": "^8.5.1",
-    "copyfiles": "^2.4.1",
     "nodemailer": "^6.9.1"
   },
   "devDependencies": {
-    "copyfiles": "^2.4.1",
     "nodemon": "^3.1.4"
   },
   "description": ""
