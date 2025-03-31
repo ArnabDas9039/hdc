@@ -1,5 +1,8 @@
 # Logs
 .env
+venv
+__pycache__
+face-app-e86e5-firebase-adminsdk-fbsvc-8d88d4f80e.json
 logs
 *.log
 npm-debug.log*
