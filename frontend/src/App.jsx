@@ -2,11 +2,13 @@ import "./index.css";
 import FaceRecognitionApp from "./FaceRecognitionApp";
 import AdminUpload from "./AdminUpload";
 import { Route, Routes } from "react-router-dom";
+import FlowerApp from "./Flower.jsx";
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<FaceRecognitionApp />} />
+      <Route path="/invite" element={<FlowerApp />} />
       <Route path="/admin" element={<AdminUpload />} />
     </Routes>
   );

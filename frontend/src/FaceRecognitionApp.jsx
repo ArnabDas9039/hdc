@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import "./styles/Face.css";
 import "./styles/Loading.css";
 import { Link } from "react-router-dom";
+import FlowerApp from "./Flower";
 
 export default function FaceRecognitionApp() {
   const [matchResult, setMatchResult] = useState(null);
@@ -11,6 +13,7 @@ export default function FaceRecognitionApp() {
   const [requestId, setRequestId] = useState(null);
   const [approvalStatus, setApprovalStatus] = useState(null);
   const statusCheckInterval = useRef(null);
+  const navigate = useNavigate();
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -142,6 +145,12 @@ export default function FaceRecognitionApp() {
       // console.log("Processing ended.");
     }
   }, [isProcessing]);
+
+  useEffect(() => {
+    if (matchResult?.isMatch || approvalStatus === "approved") {
+      navigate("/invite");
+    }
+  }, [matchResult, approvalStatus, navigate]);
 
   return (
     <div className="app-container">
