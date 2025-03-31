@@ -5,7 +5,20 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import path from "path";
 import { initializeApp } from "firebase/app";
-import { getStorage, ref, deleteObject } from "firebase/storage";
+import {
+  getStorage,
+  ref,
+  deleteObject,
+  uploadBytes,
+  listAll,
+  getDownloadURL,
+} from "firebase/storage";
+import fetch from "node-fetch";
+import * as faceapi from "face-api.js";
+import canvas from "canvas";
+
+const { Canvas, Image, ImageData } = canvas;
+faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.resolve();
@@ -37,101 +50,306 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Store pending approvals in memory (replace with database in production)
 const pendingApprovals = new Map();
+const recognizedFacesCache = []; // In-memory cache for recognized faces
 
-app.post("/api/send-email", async (req, res) => {
-  const { subject, message, image, filename } = req.body;
-  const requestId = Date.now().toString();
+// Load face-api.js models
+const loadModels = async () => {
+  console.log("Loading models");
+  await faceapi.nets.ssdMobilenetv1.loadFromDisk("./models");
+  await faceapi.nets.faceLandmark68Net.loadFromDisk("./models");
+  await faceapi.nets.faceRecognitionNet.loadFromDisk("./models");
+};
+loadModels();
 
-  // Store the approval request with filename
-  pendingApprovals.set(requestId, { image, filename, status: "pending" });
+const loadRecognizedFaces = async () => {
+  try {
+    const facesRef = ref(storage, "faces/");
+    const imagesList = await listAll(facesRef);
 
-  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+    const faces = await Promise.all(
+      imagesList.items.map(async (item) => {
+        const url = await getDownloadURL(item);
+        const imgBuffer = await fetch(url).then((res) => res.arrayBuffer());
+        const imgCanvas = await canvas.loadImage(Buffer.from(imgBuffer));
+        const detection = await faceapi
+          .detectSingleFace(imgCanvas)
+          .withFaceLandmarks()
+          .withFaceDescriptor();
 
-  const approveLink = `${baseUrl}/api/approve/${requestId}`;
-  const denyLink = `${baseUrl}/api/deny/${requestId}`;
+        return detection
+          ? {
+              descriptor: Array.from(detection.descriptor),
+              filename: item.name,
+            }
+          : null;
+      })
+    );
 
-  const htmlContent = `
-    <p>${message}</p>
-    <p>${image}</p>
-    <p>Click to respond:</p>
-    <div>
-      <a href="${approveLink}" style="background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; margin-right: 10px;">Approve</a>
-      <a href="${denyLink}" style="background: #f44336; color: white; padding: 10px 20px; text-decoration: none;">Deny</a>
-    </div>
-  `;
+    recognizedFacesCache.push(...faces.filter(Boolean));
+    console.log(
+      `Loaded ${recognizedFacesCache.length} recognized faces into cache.`
+    );
+  } catch (error) {
+    console.error("Error loading recognized faces:", error);
+  }
+};
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: process.env.EMAIL_USER,
-    subject: subject,
-    html: htmlContent,
-  };
+loadRecognizedFaces();
+
+// Admin upload route
+app.post("/api/admin-upload", async (req, res) => {
+  const { filename, imageBuffer } = req.body;
 
   try {
-    await transporter.sendMail(mailOptions);
-    res.status(200).json({ requestId });
+    // Upload the image to Firebase
+    const adminRef = ref(storage, `faces/${filename}`);
+    await uploadBytes(adminRef, Buffer.from(imageBuffer, "base64"));
+
+    // Process the uploaded image and add to cache
+    const imgCanvas = await canvas.loadImage(
+      Buffer.from(imageBuffer, "base64")
+    );
+    const detection = await faceapi
+      .detectSingleFace(imgCanvas)
+      .withFaceLandmarks()
+      .withFaceDescriptor();
+
+    if (detection) {
+      recognizedFacesCache.push({
+        descriptor: Array.from(detection.descriptor),
+        filename,
+      });
+      console.log(`Added new face to cache: ${filename}`);
+    }
+
+    res.status(200).json({ message: "Image uploaded successfully" });
   } catch (error) {
-    console.error("Error sending email:", error);
-    res.status(500).send("Failed to send email");
+    console.error("Error uploading admin image:", error);
+    res.status(500).json({ error: "Failed to upload image" });
   }
 });
 
-// Approval endpoint
+// Get all admin faces
+app.get("/api/admin-faces", async (req, res) => {
+  try {
+    const facesRef = ref(storage, "faces/");
+    const imagesList = await listAll(facesRef);
+
+    const faces = await Promise.all(
+      imagesList.items.map(async (item) => {
+        const url = await getDownloadURL(item);
+        return {
+          filename: item.name,
+          image: url,
+        };
+      })
+    );
+
+    res.json({ faces });
+  } catch (error) {
+    console.error("Error fetching faces:", error);
+    res.status(500).json({ error: "Failed to fetch faces" });
+  }
+});
+
+// Delete admin face
+app.delete("/api/admin-delete/:filename", async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const faceRef = ref(storage, `faces/${filename}`);
+    await deleteObject(faceRef);
+    res.json({ message: "Face deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting face:", error);
+    res.status(500).json({ error: "Failed to delete face" });
+  }
+});
+
+// Approve request route
 app.get("/api/approve/:requestId", async (req, res) => {
   const { requestId } = req.params;
-  const request = pendingApprovals.get(requestId);
-
-  if (!request) {
-    return res.status(404).send("Request not found or already processed");
-  }
 
   try {
-    // Delete from Firebase storage directly
-    const imageRef = ref(storage, `pending/${request.filename}`);
-    await deleteObject(imageRef);
+    const pendingRequest = pendingApprovals.get(requestId);
+    if (!pendingRequest || pendingRequest.status !== "pending") {
+      return res
+        .status(400)
+        .json({ error: "Invalid or already processed request." });
+    }
 
-    pendingApprovals.set(requestId, { ...request, status: "approved" });
-    res.send("Successfully approved the request!");
+    const { filename } = pendingRequest;
+
+    // Delete the image from the pending folder
+    const pendingRef = ref(storage, `pending/${filename}`);
+    await deleteObject(pendingRef);
+
+    pendingApprovals.set(requestId, { ...pendingRequest, status: "approved" });
+
+    res.status(200).json({ message: "Request approved and image deleted." });
   } catch (error) {
-    console.error("Error processing approval:", error);
-    res.status(500).send("Failed to process approval");
+    console.error("Error approving request:", error);
+    res.status(500).json({ error: "Failed to approve request." });
   }
 });
 
-// Denial endpoint
+// Deny request route
 app.get("/api/deny/:requestId", async (req, res) => {
   const { requestId } = req.params;
-  const request = pendingApprovals.get(requestId);
-
-  if (!request) {
-    return res.status(404).send("Request not found or already processed");
-  }
 
   try {
-    // Delete from Firebase storage directly
-    const imageRef = ref(storage, `pending/${request.filename}`);
-    await deleteObject(imageRef);
+    const pendingRequest = pendingApprovals.get(requestId);
+    if (!pendingRequest || pendingRequest.status !== "pending") {
+      return res
+        .status(400)
+        .json({ error: "Invalid or already processed request." });
+    }
 
-    pendingApprovals.set(requestId, { ...request, status: "denied" });
-    res.send("Request has been denied.");
+    const { filename } = pendingRequest;
+
+    // Delete the image from the pending folder
+    const pendingRef = ref(storage, `pending/${filename}`);
+    await deleteObject(pendingRef);
+
+    pendingApprovals.set(requestId, { ...pendingRequest, status: "denied" });
+
+    res.status(200).json({ message: "Request denied and image deleted." });
   } catch (error) {
-    console.error("Error processing denial:", error);
-    res.status(500).send("Failed to process denial");
+    console.error("Error denying request:", error);
+    res.status(500).json({ error: "Failed to deny request." });
   }
 });
 
-// Status check endpoint
-app.get("/api/status/:requestId", async (req, res) => {
+// Add new endpoint for checking request status
+app.get("/api/check-status/:requestId", (req, res) => {
   const { requestId } = req.params;
   const request = pendingApprovals.get(requestId);
 
   if (!request) {
-    return res.status(404).json({ status: "not_found" });
+    return res.status(404).json({ error: "Request not found" });
   }
 
   res.json({ status: request.status });
+});
+
+// Process face route
+app.post("/api/process-face", async (req, res) => {
+  console.log("Received face processing request");
+  const { imageData } = req.body;
+
+  if (!imageData) {
+    console.log("No image data provided in request");
+    return res.status(400).json({ error: "No image data provided" });
+  }
+
+  try {
+    console.log("Processing image data...");
+    const imgBuffer = Buffer.from(imageData, "base64");
+
+    // Validate the buffer contains image data
+    if (imgBuffer.length === 0) {
+      console.log("Empty image buffer");
+      return res.status(400).json({ error: "Empty image buffer" });
+    }
+
+    // Load the uploaded image directly from buffer
+    const imgCanvas = await canvas.loadImage(imgBuffer);
+
+    const detections = await faceapi
+      .detectAllFaces(imgCanvas)
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    if (detections.length === 0) {
+      console.log("No face detected in uploaded image");
+      return res.status(400).json({ error: "No face detected in the image." });
+    }
+
+    if (detections.length > 1) {
+      console.log("Multiple faces detected in uploaded image");
+      return res.json({
+        isMatch: false,
+        error: "Multiple faces detected. Please upload a single face.",
+      });
+    }
+
+    console.log("Single face detected, performing matching...");
+    const uploadedDescriptor = detections[0].descriptor;
+
+    const calculateDistance = (desc1, desc2) =>
+      Math.sqrt(
+        desc1.reduce((sum, val, i) => sum + Math.pow(val - desc2[i], 2), 0)
+      );
+
+    const bestMatch = recognizedFacesCache.reduce(
+      (best, face) => {
+        const distance = calculateDistance(uploadedDescriptor, face.descriptor);
+        return distance < best.distance ? { face, distance } : best;
+      },
+      { face: null, distance: Infinity }
+    );
+
+    if (bestMatch.distance < 0.6) {
+      console.log(
+        `Match found! Confidence: ${((1 - bestMatch.distance) * 100).toFixed(
+          2
+        )}%`
+      );
+      // Don't store the image if it's a match
+      return res.json({
+        isMatch: true,
+        label: bestMatch.face.filename,
+        confidence: ((1 - bestMatch.distance) * 100).toFixed(2),
+      });
+    }
+
+    console.log(`No match found. Best match distance: ${bestMatch.distance}`);
+    // Only store unmatched faces in pending folder
+    const pendingFilename = `pending_${Date.now()}.jpg`;
+    const pendingRef = ref(storage, `pending/${pendingFilename}`);
+    await uploadBytes(pendingRef, imgBuffer);
+
+    const downloadURL = await getDownloadURL(pendingRef);
+
+    const requestId = Date.now().toString();
+    pendingApprovals.set(requestId, {
+      filename: pendingFilename,
+      status: "pending",
+    });
+
+    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+    const approveLink = `${baseUrl}/api/approve/${requestId}`;
+    const denyLink = `${baseUrl}/api/deny/${requestId}`;
+
+    const htmlContent = `
+      <p>New face recognition request</p>
+      <p>Match Result: No match found</p>
+      <img src="${downloadURL}" alt="Uploaded face" style="max-width: 300px; margin: 10px 0;" />
+      <p>Click to respond:</p>
+      <div>
+        <a href="${approveLink}" style="background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; margin-right: 10px;">Approve</a>
+        <a href="${denyLink}" style="background: #f44336; color: white; padding: 10px 20px; text-decoration: none;">Deny</a>
+      </div>
+    `;
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_USER,
+      subject: "Face Recognition Approval Needed",
+      html: htmlContent,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({
+      isMatch: false,
+      pending: true,
+      requestId,
+    });
+  } catch (error) {
+    console.error("Error processing face:", error);
+    res.status(500).json({ error: "Failed to process face." });
+  }
 });
 
 if (process.env.NODE_ENV === "developement") {
@@ -144,7 +362,7 @@ if (process.env.NODE_ENV === "developement") {
   });
 
   app.use(
-    express.static(path.join(__dirname, "/face-app/dist"), {
+    express.static(path.join(__dirname, "/frontend/dist"), {
       setHeaders: (res, path) => {
         if (path.endsWith(".js")) {
           res.setHeader("Content-Type", "application/javascript");
@@ -154,7 +372,7 @@ if (process.env.NODE_ENV === "developement") {
   );
 
   app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "/face-app/dist", "index.html"));
+    res.sendFile(path.join(__dirname, "/frontend/dist", "index.html"));
   });
 }
 
