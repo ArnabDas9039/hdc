@@ -12,7 +12,8 @@ function FlowerApp() {
   return (
     <div className="body">
       <div className="night">
-        <p className="invite-text">AZAD HALL DAY CELEBRATION</p>
+        <p className="invite-text">Invitation to D-402</p>
+        <p className="invite-text">Azad Hall of Residence</p>
       </div>
       <div className="flowers">
         <div className="flower flower--1">
