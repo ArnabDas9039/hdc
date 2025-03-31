@@ -154,6 +154,7 @@ export default function FaceRecognitionApp() {
 
   return (
     <div className="app-container">
+      <p className="invite-text">Upload a selfie to continue...</p>
       <div className="input-container">
         <input
           type="file"
